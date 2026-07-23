@@ -63,7 +63,7 @@ window.onerror = function (msg, src, line) {
 </script>
 <script type="text/babel" data-presets="react">
 // Opening Lab — pre-game opening roller + practice log
-// Patch: 5 (hosted build)
+// Patch: 6 (explicit log confirmation)
 const { useState, useEffect, useCallback } = React;
 
 // ---------- Default pools ----------
@@ -149,7 +149,9 @@ function OpeningLab() {
   const [pools, setPools] = useState({ white: DEFAULT_WHITE, black: DEFAULT_BLACK });
   const [log, setLog] = useState([]);
   const [roll, setRoll] = useState(null); // {color, white?, black?}
-  const [pendingFeel, setPendingFeel] = useState("fine");
+  const [pendingFeel, setPendingFeel] = useState(null);
+  const [pendingResult, setPendingResult] = useState(null);
+  const [pendingBranch, setPendingBranch] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [saveNote, setSaveNote] = useState("");
   const [showData, setShowData] = useState(false);
@@ -200,30 +202,40 @@ function OpeningLab() {
       });
       setRoll({ color: "black", black: plan });
     }
-    setPendingFeel("fine");
+    setPendingFeel(null);
+    setPendingResult(null);
+    setPendingBranch(null);
   };
 
   // ---- logging ----
-  const logGame = (result) => {
-    if (!roll) return;
-    const entries = [];
-    const now = new Date().toISOString();
-    if (roll.color === "white") {
-      entries.push({ opening: roll.white.name, eco: roll.white.eco, color: "white", result, feel: pendingFeel, at: now });
-    } else {
-      // Log against the branch actually faced is unknown pre-game; log the full plan as one entry per branch is noisy.
-      // Convention: log the plan's primary line the user faced — ask via branch buttons instead.
-    }
-    const nextLog = [...log, ...entries];
+  const logGame = () => {
+    if (!roll || roll.color !== "white" || !pendingResult || !pendingFeel) return;
+    const entry = {
+      opening: roll.white.name,
+      eco: roll.white.eco,
+      color: "white",
+      result: pendingResult,
+      feel: pendingFeel,
+      at: new Date().toISOString(),
+    };
+    const nextLog = [...log, entry];
     setLog(nextLog);
     persist(pools, nextLog);
     setRoll(null);
   };
 
-  const logBlackGame = (branch, result) => {
-    if (!roll || !roll.black || !roll.black[branch]) return;
-    const pick = roll.black[branch];
-    const entry = { opening: pick.name, eco: pick.eco, color: "black", result, feel: pendingFeel, at: new Date().toISOString() };
+  const logBlackGame = () => {
+    if (!roll || !roll.black || !pendingBranch || !pendingResult || !pendingFeel) return;
+    const pick = roll.black[pendingBranch];
+    if (!pick) return;
+    const entry = {
+      opening: pick.name,
+      eco: pick.eco,
+      color: "black",
+      result: pendingResult,
+      feel: pendingFeel,
+      at: new Date().toISOString(),
+    };
     const nextLog = [...log, entry];
     setLog(nextLog);
     persist(pools, nextLog);
@@ -286,17 +298,20 @@ function OpeningLab() {
     </div>
   );
 
-  const ResultButtons = ({ onPick }) => (
+  const ResultButtons = ({ value, onPick }) => (
     <div className="flex gap-2 mt-3">
       {["win", "draw", "loss"].map((r) => (
         <button
           key={r}
           onClick={() => onPick(r)}
+          aria-pressed={value === r}
           className="flex-1 py-2 text-xs uppercase tracking-widest rounded-sm"
           style={{
             fontFamily: fontStack.mono,
             background: r === "win" ? C.green : r === "loss" ? C.stamp : C.inkSoft,
             color: C.paper,
+            opacity: value && value !== r ? 0.45 : 1,
+            boxShadow: value === r ? `0 0 0 2px ${C.ink}` : "none",
           }}
         >
           {r}
@@ -409,10 +424,35 @@ function OpeningLab() {
                 </div>
                 <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 12, paddingTop: 10 }}>
                   <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
-                    AFTER THE GAME — HOW DID IT FEEL, AND HOW DID IT END?
+                    AFTER THE GAME — RESULT
+                  </div>
+                  <ResultButtons value={pendingResult} onPick={setPendingResult} />
+                  <div
+                    style={{
+                      fontFamily: fontStack.mono,
+                      fontSize: 11,
+                      letterSpacing: "0.15em",
+                      color: C.inkSoft,
+                      marginTop: 12,
+                    }}
+                  >
+                    HOW DID IT FEEL?
                   </div>
                   <FeelPicker />
-                  <ResultButtons onPick={(r) => logGame(r)} />
+                  <button
+                    onClick={logGame}
+                    disabled={!pendingResult || !pendingFeel}
+                    className="w-full py-3 mt-3 text-xs uppercase tracking-widest rounded-sm"
+                    style={{
+                      fontFamily: fontStack.mono,
+                      background: C.ink,
+                      color: C.paper,
+                      opacity: pendingResult && pendingFeel ? 1 : 0.4,
+                      cursor: pendingResult && pendingFeel ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    Log game
+                  </button>
                 </div>
                 <button
                   onClick={() => setRoll(null)}
@@ -440,12 +480,22 @@ function OpeningLab() {
                       {["win", "draw", "loss"].map((r) => (
                         <button
                           key={r}
-                          onClick={() => logBlackGame(branch, r)}
+                          onClick={() => {
+                            setPendingBranch(branch);
+                            setPendingResult(r);
+                          }}
+                          aria-pressed={pendingBranch === branch && pendingResult === r}
                           className="flex-1 py-1.5 text-xs uppercase tracking-widest rounded-sm"
                           style={{
                             fontFamily: fontStack.mono,
                             background: r === "win" ? C.green : r === "loss" ? C.stamp : C.inkSoft,
                             color: C.paper,
+                            opacity:
+                              pendingBranch && (pendingBranch !== branch || pendingResult !== r) ? 0.45 : 1,
+                            boxShadow:
+                              pendingBranch === branch && pendingResult === r
+                                ? `0 0 0 2px ${C.ink}`
+                                : "none",
                           }}
                         >
                           {r}
@@ -456,9 +506,23 @@ function OpeningLab() {
                 ))}
                 <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 12, paddingTop: 10 }}>
                   <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
-                    TAG THE FEEL FIRST, THEN LOG UNDER THE BRANCH YOU FACED
+                    HOW DID IT FEEL?
                   </div>
                   <FeelPicker />
+                  <button
+                    onClick={logBlackGame}
+                    disabled={!pendingBranch || !pendingResult || !pendingFeel}
+                    className="w-full py-3 mt-3 text-xs uppercase tracking-widest rounded-sm"
+                    style={{
+                      fontFamily: fontStack.mono,
+                      background: C.ink,
+                      color: C.paper,
+                      opacity: pendingBranch && pendingResult && pendingFeel ? 1 : 0.4,
+                      cursor: pendingBranch && pendingResult && pendingFeel ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    Log game
+                  </button>
                 </div>
                 <button
                   onClick={() => setRoll(null)}
