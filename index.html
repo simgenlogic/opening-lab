@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Opening Lab</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+/* Hand-rolled utilities (replaces Tailwind CDN — no external stylesheet dependency) */
+*{box-sizing:border-box}
+.flex{display:flex}.flex-1{flex:1 1 0%}.flex-col{flex-direction:column}
+.items-center{align-items:center}.items-start{align-items:flex-start}.items-baseline{align-items:baseline}
+.justify-between{justify-content:space-between}
+.gap-1{gap:4px}.gap-2{gap:8px}.gap-4{gap:16px}
+.p-4{padding:16px}.px-3{padding-left:12px;padding-right:12px}.px-4{padding-left:16px;padding-right:16px}
+.py-1\.5{padding-top:6px;padding-bottom:6px}.py-2{padding-top:8px;padding-bottom:8px}
+.py-3{padding-top:12px;padding-bottom:12px}.py-4{padding-top:16px;padding-bottom:16px}
+.pt-6{padding-top:24px}.pb-3{padding-bottom:12px}
+.mt-2{margin-top:8px}.mt-3{margin-top:12px}.mx-auto{margin-left:auto;margin-right:auto}
+.min-h-screen{min-height:100vh}.w-full{width:100%}.max-w-xl{max-width:576px}
+.rounded-sm{border-radius:2px}
+.text-xs{font-size:12px;line-height:16px}.text-sm{font-size:14px;line-height:20px}
+.font-semibold{font-weight:600}
+.uppercase{text-transform:uppercase}.tracking-widest{letter-spacing:.1em}
+.underline{text-decoration:underline}
+button{border:none;cursor:pointer;font:inherit}
+</style>
+</head>
+<body style="margin:0">
+<div id="root"></div>
+<div id="errbar" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#8C2F23;color:#EFE9D9;font:12px monospace;padding:8px 12px;z-index:99"></div>
+<script>
+// Surface any runtime error instead of failing silently
+window.onerror = function (msg, src, line) {
+  var bar = document.getElementById("errbar");
+  bar.style.display = "block";
+  bar.textContent = "Error: " + msg + " (line " + line + ")";
+};
+// Persistence shim with safe fallback: localStorage when available, in-memory otherwise
+(function () {
+  var mem = {};
+  var canLS = false;
+  try { localStorage.setItem("__t", "1"); localStorage.removeItem("__t"); canLS = true; } catch (e) {}
+  window.storage = {
+    async get(key) {
+      var v = canLS ? localStorage.getItem(key) : (key in mem ? mem[key] : null);
+      if (v === null || v === undefined) throw new Error("not found");
+      return { key: key, value: v };
+    },
+    async set(key, value) {
+      if (canLS) localStorage.setItem(key, value); else mem[key] = value;
+      return { key: key, value: value };
+    },
+    async delete(key) {
+      if (canLS) localStorage.removeItem(key); else delete mem[key];
+      return { key: key, deleted: true };
+    },
+    persistent: canLS
+  };
+})();
+</script>
+<script type="text/babel" data-presets="react">
+// Opening Lab — pre-game opening roller + practice log
+// Patch: 5 (hosted build)
+const { useState, useEffect, useCallback } = React;
+
+// ---------- Default pools ----------
+const DEFAULT_WHITE = [
+  { id: "w1", name: "Vienna Game", eco: "C25", moves: "1.e4 e5 2.Nc3", on: true },
+  { id: "w2", name: "Italian Game", eco: "C50", moves: "1.e4 e5 2.Nf3 Nc6 3.Bc4", on: true },
+  { id: "w3", name: "Ruy Lopez", eco: "C60", moves: "1.e4 e5 2.Nf3 Nc6 3.Bb5", on: true },
+  { id: "w4", name: "Scotch Game", eco: "C45", moves: "1.e4 e5 2.Nf3 Nc6 3.d4", on: true },
+  { id: "w5", name: "King's Gambit", eco: "C30", moves: "1.e4 e5 2.f4", on: true },
+  { id: "w6", name: "Queen's Gambit", eco: "D06", moves: "1.d4 d5 2.c4", on: true },
+  { id: "w7", name: "London System", eco: "D02", moves: "1.d4 + Bf4 setup", on: true },
+  { id: "w8", name: "Catalan", eco: "E00", moves: "1.d4 Nf6 2.c4 e6 3.g3", on: true },
+  { id: "w9", name: "English Opening", eco: "A10", moves: "1.c4", on: true },
+];
+
+const DEFAULT_BLACK = {
+  "vs 1.e4": [
+    { id: "be1", name: "Open Games (1...e5)", eco: "C20", moves: "1.e4 e5", on: true },
+    { id: "be2", name: "Sicilian Defense", eco: "B20", moves: "1.e4 c5", on: true },
+    { id: "be3", name: "Caro-Kann", eco: "B10", moves: "1.e4 c6", on: true },
+    { id: "be4", name: "French Defense", eco: "C00", moves: "1.e4 e6", on: true },
+    { id: "be5", name: "Scandinavian", eco: "B01", moves: "1.e4 d5", on: true },
+    { id: "be6", name: "Pirc / Modern", eco: "B07", moves: "1.e4 d6 / g6", on: true },
+  ],
+  "vs 1.d4": [
+    { id: "bd1", name: "Queen's Gambit Declined", eco: "D30", moves: "1.d4 d5 2.c4 e6", on: true },
+    { id: "bd2", name: "Slav Defense", eco: "D10", moves: "1.d4 d5 2.c4 c6", on: true },
+    { id: "bd3", name: "King's Indian", eco: "E60", moves: "1.d4 Nf6 2.c4 g6", on: true },
+    { id: "bd4", name: "Nimzo / Queen's Indian", eco: "E20", moves: "1.d4 Nf6 2.c4 e6", on: true },
+    { id: "bd5", name: "Grünfeld", eco: "D70", moves: "...g6 + ...d5", on: true },
+    { id: "bd6", name: "Dutch Defense", eco: "A80", moves: "1.d4 f5", on: true },
+  ],
+  "vs 1.c4 / 1.Nf3": [
+    { id: "bf1", name: "Reversed Sicilian (...e5)", eco: "A20", moves: "1.c4 e5", on: true },
+    { id: "bf2", name: "Symmetric English", eco: "A30", moves: "1.c4 c5", on: true },
+    { id: "bf3", name: "King's Indian setup", eco: "A15", moves: "...Nf6, ...g6, ...d6", on: true },
+    { id: "bf4", name: "Slav-style (...d5, ...c6)", eco: "A11", moves: "...d5 + ...c6", on: true },
+  ],
+};
+
+const STORE_KEY = "opening-lab-v1";
+const FEELS = [
+  { key: "enjoyed", label: "Enjoyed it" },
+  { key: "fine", label: "Fine" },
+  { key: "slog", label: "A slog" },
+];
+
+// ---------- Palette (tournament wall-chart) ----------
+const C = {
+  felt: "#22372B", // club vinyl green
+  feltDeep: "#1A2B21",
+  paper: "#EFE9D9", // scoresheet buff
+  paperDim: "#E3DCC8",
+  ink: "#1C1B16",
+  inkSoft: "#5B584C",
+  line: "#C9C1A8",
+  stamp: "#8C2F23", // red ink stamp
+  green: "#2F6B46",
+};
+
+const fontStack = {
+  display: "'Archivo Black', 'Arial Black', sans-serif",
+  mono: "'IBM Plex Mono', 'Courier New', monospace",
+  body: "'IBM Plex Sans', system-ui, sans-serif",
+};
+
+// Exploration-weighted pick: fewer logged games => higher weight
+function weightedPick(items, gameCounts) {
+  const live = items.filter((i) => i.on);
+  if (live.length === 0) return null;
+  const weights = live.map((i) => 1 / (1 + (gameCounts[i.name] || 0)));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let k = 0; k < live.length; k++) {
+    r -= weights[k];
+    if (r <= 0) return live[k];
+  }
+  return live[live.length - 1];
+}
+
+function OpeningLab() {
+  const [tab, setTab] = useState("roll");
+  const [pools, setPools] = useState({ white: DEFAULT_WHITE, black: DEFAULT_BLACK });
+  const [log, setLog] = useState([]);
+  const [roll, setRoll] = useState(null); // {color, white?, black?}
+  const [pendingFeel, setPendingFeel] = useState("fine");
+  const [loaded, setLoaded] = useState(false);
+  const [saveNote, setSaveNote] = useState("");
+  const [showData, setShowData] = useState(false);
+  const [importText, setImportText] = useState("");
+
+  // ---- load / save ----
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(STORE_KEY);
+        if (res && res.value) {
+          const data = JSON.parse(res.value);
+          if (data.pools) setPools(data.pools);
+          if (data.log) setLog(data.log);
+        }
+      } catch (e) {
+        // first run — defaults are fine
+      }
+      setLoaded(true);
+    })();
+  }, []);
+
+  const persist = useCallback(async (nextPools, nextLog) => {
+    try {
+      await window.storage.set(STORE_KEY, JSON.stringify({ pools: nextPools, log: nextLog }));
+      setSaveNote("");
+    } catch (e) {
+      setSaveNote("Couldn't save — data lives in this session only.");
+    }
+  }, []);
+
+  const gameCounts = {};
+  log.forEach((g) => {
+    gameCounts[g.opening] = (gameCounts[g.opening] || 0) + 1;
+  });
+
+  // ---- rolling ----
+  const doRoll = (color) => {
+    const c = color === "either" ? (Math.random() < 0.5 ? "white" : "black") : color;
+    if (c === "white") {
+      const pick = weightedPick(pools.white, gameCounts);
+      setRoll(pick ? { color: "white", white: pick } : null);
+    } else {
+      const plan = {};
+      Object.entries(pools.black).forEach(([branch, items]) => {
+        const pick = weightedPick(items, gameCounts);
+        if (pick) plan[branch] = pick;
+      });
+      setRoll({ color: "black", black: plan });
+    }
+    setPendingFeel("fine");
+  };
+
+  // ---- logging ----
+  const logGame = (result) => {
+    if (!roll) return;
+    const entries = [];
+    const now = new Date().toISOString();
+    if (roll.color === "white") {
+      entries.push({ opening: roll.white.name, eco: roll.white.eco, color: "white", result, feel: pendingFeel, at: now });
+    } else {
+      // Log against the branch actually faced is unknown pre-game; log the full plan as one entry per branch is noisy.
+      // Convention: log the plan's primary line the user faced — ask via branch buttons instead.
+    }
+    const nextLog = [...log, ...entries];
+    setLog(nextLog);
+    persist(pools, nextLog);
+    setRoll(null);
+  };
+
+  const logBlackGame = (branch, result) => {
+    if (!roll || !roll.black || !roll.black[branch]) return;
+    const pick = roll.black[branch];
+    const entry = { opening: pick.name, eco: pick.eco, color: "black", result, feel: pendingFeel, at: new Date().toISOString() };
+    const nextLog = [...log, entry];
+    setLog(nextLog);
+    persist(pools, nextLog);
+    setRoll(null);
+  };
+
+  // ---- pool editing ----
+  const toggleWhite = (id) => {
+    const nextWhite = pools.white.map((i) => (i.id === id ? { ...i, on: !i.on } : i));
+    const nextPools = { ...pools, white: nextWhite };
+    setPools(nextPools);
+    persist(nextPools, log);
+  };
+  const toggleBlack = (branch, id) => {
+    const nextBranch = pools.black[branch].map((i) => (i.id === id ? { ...i, on: !i.on } : i));
+    const nextPools = { ...pools, black: { ...pools.black, [branch]: nextBranch } };
+    setPools(nextPools);
+    persist(nextPools, log);
+  };
+
+  // ---- trends ----
+  const trendRows = (() => {
+    const map = {};
+    log.forEach((g) => {
+      if (!map[g.opening]) map[g.opening] = { opening: g.opening, eco: g.eco, color: g.color, n: 0, pts: 0, joy: 0 };
+      const row = map[g.opening];
+      row.n += 1;
+      row.pts += g.result === "win" ? 1 : g.result === "draw" ? 0.5 : 0;
+      row.joy += g.feel === "enjoyed" ? 1 : 0;
+    });
+    return Object.values(map)
+      .map((r) => ({ ...r, score: r.pts / r.n, joyPct: r.joy / r.n }))
+      .sort((a, b) => b.n - a.n);
+  })();
+
+  const studyTargets = trendRows.filter((r) => r.n >= 5 && r.score < 0.4);
+
+  // ---------- UI bits ----------
+  const Tab = ({ id, label }) => (
+    <button
+      onClick={() => setTab(id)}
+      className="px-3 py-2 text-xs uppercase tracking-widest"
+      style={{
+        fontFamily: fontStack.mono,
+        color: tab === id ? C.paper : "rgba(239,233,217,0.55)",
+        borderBottom: tab === id ? `2px solid ${C.paper}` : "2px solid transparent",
+        background: "transparent",
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  const Card = ({ children, style }) => (
+    <div
+      className="rounded-sm p-4"
+      style={{ background: C.paper, color: C.ink, boxShadow: "0 2px 0 rgba(0,0,0,0.35)", ...style }}
+    >
+      {children}
+    </div>
+  );
+
+  const ResultButtons = ({ onPick }) => (
+    <div className="flex gap-2 mt-3">
+      {["win", "draw", "loss"].map((r) => (
+        <button
+          key={r}
+          onClick={() => onPick(r)}
+          className="flex-1 py-2 text-xs uppercase tracking-widest rounded-sm"
+          style={{
+            fontFamily: fontStack.mono,
+            background: r === "win" ? C.green : r === "loss" ? C.stamp : C.inkSoft,
+            color: C.paper,
+          }}
+        >
+          {r}
+        </button>
+      ))}
+    </div>
+  );
+
+  const FeelPicker = () => (
+    <div className="flex gap-2 mt-3">
+      {FEELS.map((f) => (
+        <button
+          key={f.key}
+          onClick={() => setPendingFeel(f.key)}
+          className="flex-1 py-1.5 text-xs rounded-sm"
+          style={{
+            fontFamily: fontStack.body,
+            border: `1px solid ${C.line}`,
+            background: pendingFeel === f.key ? C.ink : "transparent",
+            color: pendingFeel === f.key ? C.paper : C.inkSoft,
+          }}
+        >
+          {f.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen w-full" style={{ background: C.felt, fontFamily: fontStack.body }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap');
+        button:focus-visible { outline: 2px solid ${C.paper}; outline-offset: 2px; }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+      `}</style>
+
+      {/* Header */}
+      <div className="px-4 pt-6 pb-3" style={{ background: C.feltDeep }}>
+        <div style={{ fontFamily: fontStack.mono, color: "rgba(239,233,217,0.6)", fontSize: 11, letterSpacing: "0.2em" }}>
+          PRACTICE PAIRING SYSTEM
+        </div>
+        <h1 style={{ fontFamily: fontStack.display, color: C.paper, fontSize: 28, lineHeight: 1.1, marginTop: 4 }}>
+          OPENING LAB
+        </h1>
+        <div className="flex mt-3 gap-1">
+          <Tab id="roll" label="Roll" />
+          <Tab id="trends" label="Trends" />
+          <Tab id="pools" label="Pools" />
+          <Tab id="log" label="Log" />
+        </div>
+      </div>
+
+      <div className="px-4 py-4 max-w-xl mx-auto flex flex-col gap-4">
+        {saveNote && (
+          <div style={{ fontFamily: fontStack.mono, color: C.paper, fontSize: 11 }}>{saveNote}</div>
+        )}
+
+        {/* ---------- ROLL ---------- */}
+        {tab === "roll" && (
+          <>
+            {!roll && (
+              <Card>
+                <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
+                  NEXT GAME — CHOOSE YOUR COLOR
+                </div>
+                <div className="flex gap-2 mt-3">
+                  {[
+                    { id: "white", label: "White" },
+                    { id: "black", label: "Black" },
+                    { id: "either", label: "Coin flip" },
+                  ].map((b) => (
+                    <button
+                      key={b.id}
+                      onClick={() => doRoll(b.id)}
+                      className="flex-1 py-3 rounded-sm text-sm font-semibold"
+                      style={{ background: C.ink, color: C.paper, fontFamily: fontStack.body }}
+                    >
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-3" style={{ fontSize: 12, color: C.inkSoft }}>
+                  Rolls are weighted toward lines you've played least, so coverage stays even across the library.
+                </p>
+              </Card>
+            )}
+
+            {roll && roll.color === "white" && (
+              <Card>
+                <div className="flex items-start justify-between">
+                  <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
+                    BOARD 1 — YOU HAVE WHITE
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: fontStack.mono,
+                      fontSize: 12,
+                      color: C.stamp,
+                      border: `1.5px solid ${C.stamp}`,
+                      padding: "1px 6px",
+                      transform: "rotate(-3deg)",
+                    }}
+                  >
+                    {roll.white.eco}
+                  </div>
+                </div>
+                <div style={{ fontFamily: fontStack.display, fontSize: 26, marginTop: 6 }}>{roll.white.name}</div>
+                <div style={{ fontFamily: fontStack.mono, fontSize: 13, color: C.inkSoft, marginTop: 2 }}>
+                  {roll.white.moves}
+                </div>
+                <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 12, paddingTop: 10 }}>
+                  <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
+                    AFTER THE GAME — HOW DID IT FEEL, AND HOW DID IT END?
+                  </div>
+                  <FeelPicker />
+                  <ResultButtons onPick={(r) => logGame(r)} />
+                </div>
+                <button
+                  onClick={() => setRoll(null)}
+                  className="mt-3 text-xs underline"
+                  style={{ color: C.inkSoft, fontFamily: fontStack.mono }}
+                >
+                  Discard roll
+                </button>
+              </Card>
+            )}
+
+            {roll && roll.color === "black" && (
+              <Card>
+                <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
+                  BOARD 1 — YOU HAVE BLACK · CONDITIONAL PLAN
+                </div>
+                {Object.entries(roll.black).map(([branch, pick]) => (
+                  <div key={branch} style={{ borderTop: `1px solid ${C.line}`, marginTop: 10, paddingTop: 10 }}>
+                    <div style={{ fontFamily: fontStack.mono, fontSize: 12, color: C.stamp }}>{branch}</div>
+                    <div style={{ fontFamily: fontStack.display, fontSize: 18 }}>{pick.name}</div>
+                    <div style={{ fontFamily: fontStack.mono, fontSize: 12, color: C.inkSoft }}>
+                      {pick.eco} · {pick.moves}
+                    </div>
+                    <div className="flex gap-2 mt-2">
+                      {["win", "draw", "loss"].map((r) => (
+                        <button
+                          key={r}
+                          onClick={() => logBlackGame(branch, r)}
+                          className="flex-1 py-1.5 text-xs uppercase tracking-widest rounded-sm"
+                          style={{
+                            fontFamily: fontStack.mono,
+                            background: r === "win" ? C.green : r === "loss" ? C.stamp : C.inkSoft,
+                            color: C.paper,
+                          }}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 12, paddingTop: 10 }}>
+                  <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
+                    TAG THE FEEL FIRST, THEN LOG UNDER THE BRANCH YOU FACED
+                  </div>
+                  <FeelPicker />
+                </div>
+                <button
+                  onClick={() => setRoll(null)}
+                  className="mt-3 text-xs underline"
+                  style={{ color: C.inkSoft, fontFamily: fontStack.mono }}
+                >
+                  Discard roll
+                </button>
+              </Card>
+            )}
+          </>
+        )}
+
+        {/* ---------- TRENDS ---------- */}
+        {tab === "trends" && (
+          <>
+            {studyTargets.length > 0 && (
+              <Card style={{ borderLeft: `4px solid ${C.stamp}` }}>
+                <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.stamp }}>
+                  STUDY TARGETS — 5+ GAMES, SCORING UNDER 40%
+                </div>
+                {studyTargets.map((r) => (
+                  <div key={r.opening} style={{ fontFamily: fontStack.body, fontSize: 14, marginTop: 6 }}>
+                    <strong>{r.opening}</strong>{" "}
+                    <span style={{ fontFamily: fontStack.mono, color: C.inkSoft, fontSize: 12 }}>
+                      {Math.round(r.score * 100)}% over {r.n} games
+                    </span>
+                  </div>
+                ))}
+              </Card>
+            )}
+            <Card>
+              <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
+                LIBRARY WALL CHART — {log.length} GAMES LOGGED
+              </div>
+              {trendRows.length === 0 && (
+                <p style={{ fontSize: 13, marginTop: 8, color: C.inkSoft }}>
+                  No games yet. Roll an opening, play the game on Chessiverse, then log the result here.
+                </p>
+              )}
+              {trendRows.map((r) => (
+                <div
+                  key={r.opening}
+                  className="flex items-baseline justify-between"
+                  style={{ borderTop: `1px solid ${C.line}`, marginTop: 8, paddingTop: 8 }}
+                >
+                  <div>
+                    <div style={{ fontFamily: fontStack.body, fontWeight: 600, fontSize: 14 }}>{r.opening}</div>
+                    <div style={{ fontFamily: fontStack.mono, fontSize: 11, color: C.inkSoft }}>
+                      {r.eco} · {r.color} · enjoyed {Math.round(r.joyPct * 100)}%
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: fontStack.mono, fontSize: 13 }}>
+                    <span style={{ color: r.score >= 0.5 ? C.green : C.stamp }}>{Math.round(r.score * 100)}%</span>
+                    <span style={{ color: C.inkSoft }}> / {r.n}g</span>
+                  </div>
+                </div>
+              ))}
+            </Card>
+          </>
+        )}
+
+        {/* ---------- POOLS ---------- */}
+        {tab === "pools" && (
+          <>
+            <Card>
+              <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
+                WHITE — FIXED BATCH
+              </div>
+              {pools.white.map((i) => (
+                <label
+                  key={i.id}
+                  className="flex items-center justify-between py-2"
+                  style={{ borderTop: `1px solid ${C.line}` }}
+                >
+                  <span style={{ fontSize: 14, opacity: i.on ? 1 : 0.4 }}>
+                    {i.name} <span style={{ fontFamily: fontStack.mono, fontSize: 11, color: C.inkSoft }}>{i.eco}</span>
+                  </span>
+                  <input type="checkbox" checked={i.on} onChange={() => toggleWhite(i.id)} />
+                </label>
+              ))}
+            </Card>
+            {Object.entries(pools.black).map(([branch, items]) => (
+              <Card key={branch}>
+                <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
+                  BLACK — {branch.toUpperCase()}
+                </div>
+                {items.map((i) => (
+                  <label
+                    key={i.id}
+                    className="flex items-center justify-between py-2"
+                    style={{ borderTop: `1px solid ${C.line}` }}
+                  >
+                    <span style={{ fontSize: 14, opacity: i.on ? 1 : 0.4 }}>
+                      {i.name} <span style={{ fontFamily: fontStack.mono, fontSize: 11, color: C.inkSoft }}>{i.eco}</span>
+                    </span>
+                    <input type="checkbox" checked={i.on} onChange={() => toggleBlack(branch, i.id)} />
+                  </label>
+                ))}
+              </Card>
+            ))}
+          </>
+        )}
+
+        {/* ---------- LOG ---------- */}
+        {tab === "log" && (
+          <Card>
+            <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
+              GAME LOG — MOST RECENT FIRST
+            </div>
+            {log.length === 0 && (
+              <p style={{ fontSize: 13, marginTop: 8, color: C.inkSoft }}>Nothing logged yet.</p>
+            )}
+            {[...log].reverse().map((g, idx) => (
+              <div
+                key={idx}
+                className="flex items-baseline justify-between py-2"
+                style={{ borderTop: `1px solid ${C.line}` }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{g.opening}</div>
+                  <div style={{ fontFamily: fontStack.mono, fontSize: 11, color: C.inkSoft }}>
+                    {g.color} · {g.feel} · {new Date(g.at).toLocaleDateString()}
+                  </div>
+                </div>
+                <div
+                  style={{
+                    fontFamily: fontStack.mono,
+                    fontSize: 12,
+                    color: g.result === "win" ? C.green : g.result === "loss" ? C.stamp : C.inkSoft,
+                  }}
+                >
+                  {g.result === "draw"
+                    ? "½-½"
+                    : (g.result === "win") === (g.color === "white")
+                    ? "1-0"
+                    : "0-1"}
+                </div>
+              </div>
+            ))}
+            <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 12, paddingTop: 10 }}>
+              <button
+                onClick={() => setShowData(!showData)}
+                className="text-xs underline"
+                style={{ color: C.inkSoft, fontFamily: fontStack.mono, background: "transparent" }}
+              >
+                {showData ? "Hide backup / restore" : "Backup / restore"}
+              </button>
+              {showData && (
+                <div className="mt-2 flex flex-col gap-2">
+                  <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.1em", color: C.inkSoft }}>
+                    BACKUP — COPY THIS AND SAVE IT IN YOUR NOTES APP
+                  </div>
+                  <textarea
+                    readOnly
+                    value={JSON.stringify({ pools, log })}
+                    onFocus={(e) => e.target.select()}
+                    rows={4}
+                    style={{ width: "100%", fontFamily: fontStack.mono, fontSize: 10, border: `1px solid ${C.line}`, background: C.paperDim, color: C.ink, padding: 6 }}
+                  />
+                  <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.1em", color: C.inkSoft }}>
+                    RESTORE — PASTE A SAVED BACKUP, THEN LOAD
+                  </div>
+                  <textarea
+                    value={importText}
+                    onChange={(e) => setImportText(e.target.value)}
+                    rows={3}
+                    placeholder="Paste backup text here"
+                    style={{ width: "100%", fontFamily: fontStack.mono, fontSize: 10, border: `1px solid ${C.line}`, background: C.paper, color: C.ink, padding: 6 }}
+                  />
+                  <button
+                    onClick={() => {
+                      try {
+                        const data = JSON.parse(importText);
+                        if (!data.pools || !Array.isArray(data.log)) throw new Error("bad shape");
+                        setPools(data.pools);
+                        setLog(data.log);
+                        persist(data.pools, data.log).then(() => setSaveNote("Backup restored."));
+                        setImportText("");
+                      } catch (e) {
+                        setSaveNote("That text isn't a valid backup — paste the full copied text and try again.");
+                      }
+                    }}
+                    className="py-2 text-xs uppercase tracking-widest rounded-sm"
+                    style={{ fontFamily: fontStack.mono, background: C.ink, color: C.paper }}
+                  >
+                    Load backup
+                  </button>
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {!loaded && (
+          <div style={{ fontFamily: fontStack.mono, color: "rgba(239,233,217,0.6)", fontSize: 12 }}>
+            Loading your library…
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+if (!window.storage.persistent) {
+  var bar = document.getElementById("errbar");
+  bar.style.display = "block";
+  bar.style.background = "#5B584C";
+  bar.textContent = "Note: this browser blocks local storage here, so the log won't survive closing the page.";
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<OpeningLab />);
+</script>
+</body>
+</html>
