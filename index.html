@@ -63,7 +63,7 @@ window.onerror = function (msg, src, line) {
 </script>
 <script type="text/babel" data-presets="react">
 // Opening Lab — pre-game opening roller + practice log
-// Patch: 6 (explicit log confirmation)
+// Patch: 7 (result story tags)
 const { useState, useEffect, useCallback } = React;
 
 // ---------- Default pools ----------
@@ -111,6 +111,66 @@ const FEELS = [
   { key: "slog", label: "A slog" },
 ];
 
+const RESULT_TAGS = {
+  win: [
+    {
+      key: "converted_edge",
+      label: "Converted edge",
+      description: "You built an advantage and cashed it.",
+    },
+    {
+      key: "opponent_blunder",
+      label: "Opponent blunder",
+      description: "They handed the game over; near-zero evidence about the opening.",
+    },
+    {
+      key: "swindle",
+      label: "Swindle",
+      description: "You were worse or lost and escaped through tactics or a trap.",
+    },
+  ],
+  loss: [
+    {
+      key: "known_pattern_miss",
+      label: "Known-pattern miss",
+      description: "A standard trap, tactical shot, or idea in the line caught you.",
+    },
+    {
+      key: "blunder",
+      label: "Blunder",
+      description: "A one-move giveaway unrelated to the opening.",
+    },
+    {
+      key: "outplayed",
+      label: "Outplayed",
+      description: "You understood the position and were ground down fairly.",
+    },
+  ],
+  draw: [
+    {
+      key: "held_worse",
+      label: "Held worse",
+      description: "You defended a bad position and saved the half-point.",
+    },
+    {
+      key: "win_slipped",
+      label: "Win slipped",
+      description: "You had the advantage and let the half-point get away.",
+    },
+    {
+      key: "level_fight",
+      label: "Level fight",
+      description: "Neither side ever had much; the neutral draw.",
+    },
+  ],
+};
+
+const RESULT_TAG_PROMPTS = {
+  win: "WHERE DID THE POINTS COME FROM?",
+  loss: "WHAT BROKE?",
+  draw: "WHICH HALF-POINT STORY WAS IT?",
+};
+
 // ---------- Palette (tournament wall-chart) ----------
 const C = {
   felt: "#22372B", // club vinyl green
@@ -151,6 +211,7 @@ function OpeningLab() {
   const [roll, setRoll] = useState(null); // {color, white?, black?}
   const [pendingFeel, setPendingFeel] = useState(null);
   const [pendingResult, setPendingResult] = useState(null);
+  const [pendingResultTag, setPendingResultTag] = useState(null);
   const [pendingBranch, setPendingBranch] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [saveNote, setSaveNote] = useState("");
@@ -204,17 +265,19 @@ function OpeningLab() {
     }
     setPendingFeel(null);
     setPendingResult(null);
+    setPendingResultTag(null);
     setPendingBranch(null);
   };
 
   // ---- logging ----
   const logGame = () => {
-    if (!roll || roll.color !== "white" || !pendingResult || !pendingFeel) return;
+    if (!roll || roll.color !== "white" || !pendingResult || !pendingResultTag || !pendingFeel) return;
     const entry = {
       opening: roll.white.name,
       eco: roll.white.eco,
       color: "white",
       result: pendingResult,
+      resultTag: pendingResultTag,
       feel: pendingFeel,
       at: new Date().toISOString(),
     };
@@ -225,7 +288,7 @@ function OpeningLab() {
   };
 
   const logBlackGame = () => {
-    if (!roll || !roll.black || !pendingBranch || !pendingResult || !pendingFeel) return;
+    if (!roll || !roll.black || !pendingBranch || !pendingResult || !pendingResultTag || !pendingFeel) return;
     const pick = roll.black[pendingBranch];
     if (!pick) return;
     const entry = {
@@ -233,6 +296,7 @@ function OpeningLab() {
       eco: pick.eco,
       color: "black",
       result: pendingResult,
+      resultTag: pendingResultTag,
       feel: pendingFeel,
       at: new Date().toISOString(),
     };
@@ -340,6 +404,63 @@ function OpeningLab() {
     </div>
   );
 
+  const ResultTagPicker = () => {
+    if (!pendingResult) return null;
+    return (
+      <div
+        className="mt-3 p-4 rounded-sm"
+        style={{ background: C.paperDim, border: `1px solid ${C.line}` }}
+      >
+        <div
+          style={{
+            fontFamily: fontStack.mono,
+            fontSize: 11,
+            letterSpacing: "0.15em",
+            color: C.inkSoft,
+          }}
+        >
+          {RESULT_TAG_PROMPTS[pendingResult]}
+        </div>
+        <div className="flex flex-col gap-2 mt-2">
+          {RESULT_TAGS[pendingResult].map((tag) => (
+            <button
+              key={tag.key}
+              onClick={() => setPendingResultTag(tag.key)}
+              aria-pressed={pendingResultTag === tag.key}
+              className="w-full p-4 rounded-sm"
+              style={{
+                textAlign: "left",
+                border: `1px solid ${pendingResultTag === tag.key ? C.ink : C.line}`,
+                background: pendingResultTag === tag.key ? C.ink : C.paper,
+                color: pendingResultTag === tag.key ? C.paper : C.ink,
+              }}
+            >
+              <div style={{ fontFamily: fontStack.body, fontSize: 14, fontWeight: 600 }}>
+                {tag.label}
+              </div>
+              <div
+                style={{
+                  fontFamily: fontStack.body,
+                  fontSize: 12,
+                  lineHeight: 1.35,
+                  marginTop: 3,
+                  color: pendingResultTag === tag.key ? C.paperDim : C.inkSoft,
+                }}
+              >
+                {tag.description}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const resultTagLabel = (result, key) => {
+    const tag = (RESULT_TAGS[result] || []).find((item) => item.key === key);
+    return tag ? tag.label : key;
+  };
+
   return (
     <div className="min-h-screen w-full" style={{ background: C.felt, fontFamily: fontStack.body }}>
       <style>{`
@@ -426,7 +547,14 @@ function OpeningLab() {
                   <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
                     AFTER THE GAME — RESULT
                   </div>
-                  <ResultButtons value={pendingResult} onPick={setPendingResult} />
+                  <ResultButtons
+                    value={pendingResult}
+                    onPick={(result) => {
+                      setPendingResult(result);
+                      setPendingResultTag(null);
+                    }}
+                  />
+                  <ResultTagPicker />
                   <div
                     style={{
                       fontFamily: fontStack.mono,
@@ -441,14 +569,14 @@ function OpeningLab() {
                   <FeelPicker />
                   <button
                     onClick={logGame}
-                    disabled={!pendingResult || !pendingFeel}
+                    disabled={!pendingResult || !pendingResultTag || !pendingFeel}
                     className="w-full py-3 mt-3 text-xs uppercase tracking-widest rounded-sm"
                     style={{
                       fontFamily: fontStack.mono,
                       background: C.ink,
                       color: C.paper,
-                      opacity: pendingResult && pendingFeel ? 1 : 0.4,
-                      cursor: pendingResult && pendingFeel ? "pointer" : "not-allowed",
+                      opacity: pendingResult && pendingResultTag && pendingFeel ? 1 : 0.4,
+                      cursor: pendingResult && pendingResultTag && pendingFeel ? "pointer" : "not-allowed",
                     }}
                   >
                     Log game
@@ -483,6 +611,7 @@ function OpeningLab() {
                           onClick={() => {
                             setPendingBranch(branch);
                             setPendingResult(r);
+                            setPendingResultTag(null);
                           }}
                           aria-pressed={pendingBranch === branch && pendingResult === r}
                           className="flex-1 py-1.5 text-xs uppercase tracking-widest rounded-sm"
@@ -505,20 +634,32 @@ function OpeningLab() {
                   </div>
                 ))}
                 <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 12, paddingTop: 10 }}>
-                  <div style={{ fontFamily: fontStack.mono, fontSize: 11, letterSpacing: "0.15em", color: C.inkSoft }}>
+                  <ResultTagPicker />
+                  <div
+                    style={{
+                      fontFamily: fontStack.mono,
+                      fontSize: 11,
+                      letterSpacing: "0.15em",
+                      color: C.inkSoft,
+                      marginTop: pendingResult ? 12 : 0,
+                    }}
+                  >
                     HOW DID IT FEEL?
                   </div>
                   <FeelPicker />
                   <button
                     onClick={logBlackGame}
-                    disabled={!pendingBranch || !pendingResult || !pendingFeel}
+                    disabled={!pendingBranch || !pendingResult || !pendingResultTag || !pendingFeel}
                     className="w-full py-3 mt-3 text-xs uppercase tracking-widest rounded-sm"
                     style={{
                       fontFamily: fontStack.mono,
                       background: C.ink,
                       color: C.paper,
-                      opacity: pendingBranch && pendingResult && pendingFeel ? 1 : 0.4,
-                      cursor: pendingBranch && pendingResult && pendingFeel ? "pointer" : "not-allowed",
+                      opacity: pendingBranch && pendingResult && pendingResultTag && pendingFeel ? 1 : 0.4,
+                      cursor:
+                        pendingBranch && pendingResult && pendingResultTag && pendingFeel
+                          ? "pointer"
+                          : "not-allowed",
                     }}
                   >
                     Log game
@@ -647,6 +788,11 @@ function OpeningLab() {
                   <div style={{ fontFamily: fontStack.mono, fontSize: 11, color: C.inkSoft }}>
                     {g.color} · {g.feel} · {new Date(g.at).toLocaleDateString()}
                   </div>
+                  {g.resultTag && (
+                    <div style={{ fontFamily: fontStack.mono, fontSize: 11, color: C.stamp, marginTop: 2 }}>
+                      {resultTagLabel(g.result, g.resultTag)}
+                    </div>
+                  )}
                 </div>
                 <div
                   style={{
